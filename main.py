@@ -24,6 +24,9 @@ def main():
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_g:
+                    board.toggle_grid()
 
         screen.fill((30, 30, 30))  # Background color
         # TODO: Draw game elements here
