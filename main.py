@@ -44,11 +44,11 @@ def main():
     # arclight = Arclight(grid_pos=(12, 14), team=0, color=TEAM_COLOR_BOTTOM, tile_size=board.tile_size)
     # crawlers = spawn_crawlers((8, 12), team=0, tile_size=board.tile_size, color=(100, 200, 100))
 
-    # team0_units.extend([Marksman(grid_pos=(6, 14), team=0, color=TEAM_COLOR_BOTTOM, tile_size=board.tile_size)])
-    # team1_units.extend([Marksman(grid_pos=(6, 6), team=0, color=TEAM_COLOR_TOP, tile_size=board.tile_size)])
+    team0_units.extend([Marksman(grid_pos=(6, 16), team=0, color=TEAM_COLOR_BOTTOM, tile_size=board.tile_size)])
+    team0_units.extend(spawn_crawlers((8, 14), team=0, tile_size=board.tile_size, color=TEAM_COLOR_BOTTOM))
     
-    team0_units.extend(spawn_crawlers((8, 12), team=0, tile_size=board.tile_size, color=TEAM_COLOR_BOTTOM))
-    team1_units.extend(spawn_crawlers((6, 8), team=1, tile_size=board.tile_size, color=TEAM_COLOR_TOP))
+    team1_units.extend([Arclight(grid_pos=(6, 4), team=0, color=TEAM_COLOR_TOP, tile_size=board.tile_size)])
+    team1_units.extend(spawn_crawlers((6, 6), team=1, tile_size=board.tile_size, color=TEAM_COLOR_TOP))
 
     running = True
     while running:
@@ -80,16 +80,27 @@ def main():
             unit.update_rect_position(tile_size, x_offset, y_offset)
             unit.draw(screen)
 
+        current_time = pygame.time.get_ticks() / 1000.0
+        dt = clock.get_time() / 1000.0  # milliseconds to seconds
+
         # Move units toward closest enemy
         for unit in team0_units:
             closest_enemy, enemy_pixel = find_closest_enemy(unit, team1_units)
             if closest_enemy:
-                unit.move_toward(enemy_pixel, target_unit=closest_enemy)
+                unit.move_toward(enemy_pixel, target_unit=closest_enemy, allies=team0_units, dt=dt)
+                # Attack if in range
+                dist = ((unit.pixel_pos[0] - closest_enemy.pixel_pos[0]) ** 2 + (unit.pixel_pos[1] - closest_enemy.pixel_pos[1]) ** 2) ** 0.5
+                if dist <= unit.attack_range:
+                    unit.attack(closest_enemy, current_time)
 
         for unit in team1_units:
             closest_enemy, enemy_pixel = find_closest_enemy(unit, team0_units)
             if closest_enemy:
-                unit.move_toward(enemy_pixel, target_unit=closest_enemy)
+                unit.move_toward(enemy_pixel, target_unit=closest_enemy, allies=team1_units, dt=dt)
+                # Attack if in range
+                dist = ((unit.pixel_pos[0] - closest_enemy.pixel_pos[0]) ** 2 + (unit.pixel_pos[1] - closest_enemy.pixel_pos[1]) ** 2) ** 0.5
+                if dist <= unit.attack_range:
+                    unit.attack(closest_enemy, current_time)
 
         pygame.display.flip()
         clock.tick(FPS)
