@@ -11,14 +11,14 @@ class Board:
 	TOTAL_HEIGHT = HEIGHT * 2                      # 10 + 10 = 20
 
 	# Colors
-	OUTLINE_TOP = (40, 240, 40)      # Top 10x10 main section
-	OUTLINE_BOTTOM = (40, 40, 240)   # Bottom 10x10 main section
-	# OUTLINE_BOTTOM = (40, 240, 40)      # Top 4x10 side sections
-	# OUTLINE_TOP = (240, 240, 40)  # Bottom 4x10 side sections
+	DEFAULT_OUTLINE_TOP = (40, 240, 40)      # Top 10x10 main section
+	DEFAULT_OUTLINE_BOTTOM = (40, 40, 240)   # Bottom 10x10 main section
 	GRID_COLOR = (80, 80, 80)          # Light grid lines
 
-	def __init__(self, show_grid=True):
+	def __init__(self, show_grid=True, outline_top=None, outline_bottom=None):
 		self.show_grid = show_grid
+		self.OUTLINE_TOP = outline_top if outline_top is not None else self.DEFAULT_OUTLINE_TOP
+		self.OUTLINE_BOTTOM = outline_bottom if outline_bottom is not None else self.DEFAULT_OUTLINE_BOTTOM
 
 	def toggle_grid(self):
 		self.show_grid = not self.show_grid
