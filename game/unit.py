@@ -3,7 +3,7 @@ import math
 
 
 class Unit:
-    def __init__(self, grid_pos, team, health, max_health, movement_speed_mps, attack_power, attack_range_m, attack_splash_range_m, attack_interval=1.0, size=(1, 1), color=None, tile_size=27, tile_size_m=10):
+    def __init__(self, grid_pos, team, health, max_health, movement_speed_mps, attack_power, attack_range_m, attack_splash_range_m, attack_interval=1.0, size=(1, 1), color=None, tile_size=27, tile_size_m=10, pixel_position=None):
         self.grid_pos = grid_pos      # (grid_x, grid_y)
         self.team = team             # 0 or 1
         self.health = health
@@ -20,7 +20,11 @@ class Unit:
         self.size = size             # (width, height) in grid cells
         self.alive = True
         self.color = color if color is not None else ((200, 200, 200) if team == 0 else (200, 100, 100))
-        self.pixel_pos = self.grid_to_pixel(grid_pos, tile_size)
+        
+        if pixel_position is not None:
+            self.pixel_pos = pixel_position
+        else:
+            self.pixel_pos = self.grid_to_pixel(grid_pos, tile_size)
 
     def grid_to_pixel(self, grid_pos, tile_size):
         x, y = grid_pos
@@ -103,10 +107,23 @@ class Unit:
         y = max(0, min(y, board_height - h))
         self.pixel_pos = (x, y)
 
-    def attack(self, target, current_time):
+    def attack(self, target, current_time, projectiles=None, all_units=None):
         # Only attack if enough time has passed since last attack
         if self.alive and target.alive and (current_time - self.last_attack_time >= self.attack_interval):
-            target.take_damage(self.attack_power)
+            if projectiles is not None and getattr(self, 'is_ranged', False):
+                # Ranged attack: spawn projectile
+                start_x = self.rect.x + self.rect.width // 2
+                start_y = self.rect.y + self.rect.height // 2
+                projectile = Projectile(
+                    start_pos=(start_x, start_y),
+                    target_unit=target,
+                    damage=self.attack_power,
+                    speed=400
+                )
+                projectiles.append(projectile)
+            else:
+                # Melee attack: apply damage directly
+                target.take_damage(self.attack_power)
             self.last_attack_time = current_time
 
     def take_damage(self, amount):
@@ -114,17 +131,6 @@ class Unit:
         if self.health <= 0:
             self.health = 0
             self.alive = False
-
-
-    def draw(self, surface, tile_size, x_offset=0, y_offset=0):
-        w, h = self.size
-        pixel_x = int(self.pixel_pos[0] + x_offset)
-        pixel_y = int(self.pixel_pos[1] + y_offset)
-        rect = pygame.Rect(pixel_x, pixel_y, int(w * tile_size), int(h * tile_size))
-        pygame.draw.rect(surface, self.color, rect)
-
-    def update_sprite(self, tile_size):
-        raise NotImplementedError("update_sprite must be implemented in subclasses")
 
 
 class Building(Unit, pygame.sprite.Sprite):
@@ -150,10 +156,12 @@ class Building(Unit, pygame.sprite.Sprite):
 
 
 class Marksman(Unit, pygame.sprite.Sprite):
-    def __init__(self, grid_pos, team, health=1922, max_health=1922, movement_speed_mps=8, attack_power=2326, attack_range_m=70, attack_splash_range_m=0, attack_interval=3.1, size=(2, 2), color=(200, 200, 50), tile_size=32, tile_size_m=10):
+    def __init__(self, grid_pos, team, health=1922, max_health=1922, movement_speed_mps=8, attack_power=2326, attack_range_m=120, attack_splash_range_m=0, attack_interval=3.1, size=(2, 2), color=(200, 200, 50), tile_size=32, tile_size_m=10):
         Unit.__init__(self, grid_pos, team, health, max_health, movement_speed_mps, attack_power, attack_range_m, attack_splash_range_m, attack_interval, size=size, color=color, tile_size=tile_size, tile_size_m=tile_size_m)
         pygame.sprite.Sprite.__init__(self)
         self.angle = 0  # Degrees
+
+        self.is_ranged = True   
 
         self.tile_size = tile_size
         
@@ -220,12 +228,13 @@ class Marksman(Unit, pygame.sprite.Sprite):
 
 class Arclight(Unit, pygame.sprite.Sprite):
     
-    def __init__(self, grid_pos, team, health=4813, max_health=4813, movement_speed_mps=7, attack_power=347, attack_range_m=40, attack_interval=0.9, attack_splash_range_m=7, size=(2, 2), color=(200, 200, 200), tile_size=32, tile_size_m=10):
+    def __init__(self, grid_pos, team, health=4813, max_health=4813, movement_speed_mps=7, attack_power=347, attack_range_m=70, attack_interval=0.9, attack_splash_range_m=7, size=(2, 2), color=(200, 200, 200), tile_size=32, tile_size_m=10):
         Unit.__init__(self, grid_pos, team, health, max_health, movement_speed_mps, attack_power, attack_range_m, attack_splash_range_m, attack_interval, size=size, color=color, tile_size=tile_size, tile_size_m=tile_size_m)
         pygame.sprite.Sprite.__init__(self)
         self.angle = 0  # Degrees
         self.tile_size = tile_size
         self.update_sprite(tile_size)
+        self.is_ranged = True
 
     def update_sprite(self, tile_size):
         self.tile_size = tile_size
@@ -273,16 +282,39 @@ class Arclight(Unit, pygame.sprite.Sprite):
             return distance < (self.collider_radius + other_sprite.collider_radius)
         else:
             return self.rect.colliderect(other_sprite.rect)
+        
+    def attack(self, target, current_time, projectiles=None, all_units=None):
+        # Only attack if enough time has passed since last attack
+        if self.alive and target.alive and (current_time - self.last_attack_time >= self.attack_interval):
+            if projectiles is not None and getattr(self, 'is_ranged', False):
+                # Ranged attack: spawn projectile with splash
+                start_x = self.rect.x + self.rect.width // 2
+                start_y = self.rect.y + self.rect.height // 2
+                projectile = Projectile(
+                    start_pos=(start_x, start_y),
+                    target_unit=target,
+                    damage=self.attack_power,
+                    speed=350,
+                    splash_range=self.attack_splash_range,
+                    all_units=all_units
+                )
+                projectiles.append(projectile)
+            else:
+                # Melee attack: apply damage directly
+                target.take_damage(self.attack_power)
+            self.last_attack_time = current_time
 
       
 class Crawler(Unit, pygame.sprite.Sprite):
-    def __init__(self, grid_pos, team, health=263, max_health=263, movement_speed_mps=16, attack_power=79, attack_range_m=2, attack_interval=0.6, attack_splash_range_m=0, color=(100, 200, 100), tile_size=32, tile_size_m=10):
+    def __init__(self, grid_pos, team, health=263, max_health=263, movement_speed_mps=16, attack_power=79, attack_range_m=0, attack_splash_range_m=0, attack_interval=0.6, color=(100, 200, 100), tile_size=32, tile_size_m=10, pixel_position=None):
         # movement_speed_mps=16 means 16 meters/sec, attack_range_m=2 means 2 meters
-        Unit.__init__(self, grid_pos, team, health, max_health, movement_speed_mps, attack_power, attack_range_m, attack_interval, attack_splash_range_m, size=(1, 1), color=color, tile_size=tile_size, tile_size_m=tile_size_m)
+        Unit.__init__(self, grid_pos, team, health, max_health, movement_speed_mps, attack_power, attack_range_m, attack_splash_range_m, attack_interval,  size=(1, 1), color=color, tile_size=tile_size, tile_size_m=tile_size_m, pixel_position=pixel_position)
         pygame.sprite.Sprite.__init__(self)
         self.angle = 0
         self.tile_size = tile_size
         self.update_sprite(tile_size)
+
+        self.is_ranged = False  
 
     def update_sprite(self, tile_size):
         self.tile_size = tile_size
@@ -351,21 +383,82 @@ def spawn_crawlers(start_grid_pos, team, tile_size=32, color=(100, 200, 100)):
                 grid_pos=(grid_x, grid_y),
                 team=team,
                 color=color,
-                tile_size=tile_size
+                tile_size=tile_size,
+                pixel_position=( (grid_x - 1) * tile_size, (grid_y - 1) * tile_size )
             )
-            crawler_topleft.pixel_offset = (0, 0)
             crawlers.append(crawler_topleft)
-            # Bottom-right position
+            # Bottom-right position: adjust pixel_pos directly
             crawler_bottomright = Crawler(
                 grid_pos=(grid_x, grid_y),
                 team=team,
                 color=color,
-                tile_size=tile_size
+                tile_size=tile_size,
+                pixel_position=( (grid_x - 1) * tile_size, (grid_y - 1) * tile_size )
             )
-            crawler_bottomright.pixel_offset = (tile_size // 2, tile_size // 2)
+            crawler_bottomright.pixel_pos = (
+                crawler_bottomright.pixel_pos[0] + tile_size // 2,
+                crawler_bottomright.pixel_pos[1] + tile_size // 2
+            )
             crawlers.append(crawler_bottomright)
+
     return crawlers
 
 
 
 
+class Projectile:
+    def __init__(self, start_pos, target_unit, damage, speed=400, splash_range=0, all_units=None):
+        self.pos = list(start_pos)
+        self.target_unit = target_unit
+        self.damage = damage
+        self.speed = speed
+        self.active = True
+        self.splash_range = splash_range
+        self.all_units = all_units
+
+    def update(self, dt):
+        # if not self.active or not self.target_unit.alive:
+        #     self.active = False
+        #     return
+        # Target center of target unit
+        if hasattr(self.target_unit, 'rect'):
+            tx = self.target_unit.rect.x + self.target_unit.rect.width // 2
+            ty = self.target_unit.rect.y + self.target_unit.rect.height // 2
+        else:
+            tx, ty = self.target_unit.pixel_pos
+        dx = tx - self.pos[0]
+        dy = ty - self.pos[1]
+        dist = math.hypot(dx, dy)
+        if dist < self.speed * dt or dist == 0:
+            # Reached target
+            self.pos[0], self.pos[1] = tx, ty
+            # Splash damage logic
+            if self.splash_range > 0 and self.all_units is not None:
+                for unit in self.all_units:
+                    if unit.alive and unit is not self.target_unit:
+                        # Use center of unit for distance
+                        if hasattr(unit, 'rect'):
+                            ux = unit.rect.x + unit.rect.width // 2
+                            uy = unit.rect.y + unit.rect.height // 2
+                        else:
+                            ux, uy = unit.pixel_pos
+                        splash_dist = math.hypot(ux - tx, uy - ty)
+                        if splash_dist <= self.splash_range:
+                            unit.take_damage(self.damage)
+            self.target_unit.take_damage(self.damage)
+            self.active = False
+        else:
+            self.pos[0] += self.speed * dt * dx / dist
+            self.pos[1] += self.speed * dt * dy / dist
+
+    def draw(self, surface):
+        if self.active:
+            pygame.draw.circle(surface, (255, 255, 0), (int(self.pos[0]), int(self.pos[1])), 6)
+
+
+    def draw(self, surface):
+        if self.active:
+            pygame.draw.circle(surface, (255, 255, 0), (int(self.pos[0]), int(self.pos[1])), 6)
+
+    def update_sprite(self, tile_size):
+        raise NotImplementedError("update_sprite must be implemented in subclasses")

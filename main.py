@@ -17,6 +17,8 @@ TEAM_COLOR_BOTTOM = (40, 240, 40)
 team0_units = []  # e.g., crawlers, marksman, etc. for team 0
 team1_units = []  # for team 1
 
+projectiles = []
+
 def find_closest_enemy(unit, enemy_units):
     min_dist = float('inf')
     closest = None
@@ -83,24 +85,43 @@ def main():
         current_time = pygame.time.get_ticks() / 1000.0
         dt = clock.get_time() / 1000.0  # milliseconds to seconds
 
-        # Move units toward closest enemy
+
+        # Move units and remove dead ones
+        team0_units[:] = [unit for unit in team0_units if getattr(unit, 'health', 1) > 0]
+        team1_units[:] = [unit for unit in team1_units if getattr(unit, 'health', 1) > 0]
+
         for unit in team0_units:
             closest_enemy, enemy_pixel = find_closest_enemy(unit, team1_units)
             if closest_enemy:
                 unit.move_toward(enemy_pixel, target_unit=closest_enemy, allies=team0_units, dt=dt)
-                # Attack if in range
                 dist = ((unit.pixel_pos[0] - closest_enemy.pixel_pos[0]) ** 2 + (unit.pixel_pos[1] - closest_enemy.pixel_pos[1]) ** 2) ** 0.5
-                if dist <= unit.attack_range:
-                    unit.attack(closest_enemy, current_time)
+                if hasattr(unit, 'collider_radius') and hasattr(closest_enemy, 'collider_radius'):
+                    melee_contact = unit.collider_radius + closest_enemy.collider_radius
+                    if dist <= melee_contact or dist <= unit.attack_range:
+                        if getattr(unit, 'is_ranged', False):
+                            unit.attack(closest_enemy, current_time, projectiles=projectiles, all_units=team1_units)
+                        else:
+                            unit.attack(closest_enemy, current_time)
 
         for unit in team1_units:
             closest_enemy, enemy_pixel = find_closest_enemy(unit, team0_units)
             if closest_enemy:
                 unit.move_toward(enemy_pixel, target_unit=closest_enemy, allies=team1_units, dt=dt)
-                # Attack if in range
+                unit.update(tile_size, x_offset, y_offset)
                 dist = ((unit.pixel_pos[0] - closest_enemy.pixel_pos[0]) ** 2 + (unit.pixel_pos[1] - closest_enemy.pixel_pos[1]) ** 2) ** 0.5
-                if dist <= unit.attack_range:
-                    unit.attack(closest_enemy, current_time)
+                if hasattr(unit, 'collider_radius') and hasattr(closest_enemy, 'collider_radius'):
+                    melee_contact = unit.collider_radius + closest_enemy.collider_radius
+                    if dist <= melee_contact or dist <= unit.attack_range:
+                        if getattr(unit, 'is_ranged', False):
+                            unit.attack(closest_enemy, current_time, projectiles=projectiles, all_units=team0_units)
+                        else:
+                            unit.attack(closest_enemy, current_time)
+
+        for projectile in projectiles[:]:
+            projectile.update(dt)
+            projectile.draw(screen)
+            if not projectile.active:
+                projectiles.remove(projectile)
 
         pygame.display.flip()
         clock.tick(FPS)
