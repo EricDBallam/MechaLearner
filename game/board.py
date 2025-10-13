@@ -1,0 +1,106 @@
+
+import pygame
+
+
+class Board:
+	# Section sizes
+	SIDE_WIDTH = 4
+	MAIN_WIDTH = 10
+	HEIGHT = 10
+	TOTAL_WIDTH = SIDE_WIDTH * 2 + MAIN_WIDTH      # 4 + 10 + 4 = 18
+	TOTAL_HEIGHT = HEIGHT * 2                      # 10 + 10 = 20
+
+	# Colors
+	OUTLINE_COLOR = (40, 40, 240)   # Dark outline
+	GRID_COLOR = (180, 240, 180)   # Light grid lines
+
+	def __init__(self):
+		pass  # No static positions; everything is dynamic
+
+
+	def draw(self, surface):
+		window_width, window_height = surface.get_size()
+		# Dynamically calculate tile size to fit window
+		tile_size = min(window_width // self.TOTAL_WIDTH, window_height // self.TOTAL_HEIGHT)
+		board_width = tile_size * self.TOTAL_WIDTH
+		board_height = tile_size * self.TOTAL_HEIGHT
+		x_offset = (window_width - board_width) // 2
+		y_offset = (window_height - board_height) // 2
+
+		# Section rectangles
+		# Left side section (4x20)
+		left_rect = pygame.Rect(
+			x_offset,
+			y_offset,
+			self.SIDE_WIDTH * tile_size,
+			self.TOTAL_HEIGHT * tile_size
+		)
+		# Right side section (4x20)
+		right_rect = pygame.Rect(
+			x_offset + (self.SIDE_WIDTH + self.MAIN_WIDTH) * tile_size,
+			y_offset,
+			self.SIDE_WIDTH * tile_size,
+			self.TOTAL_HEIGHT * tile_size
+		)
+
+		# Ensure right_rect is fully inside the window
+		if right_rect.right > x_offset + self.TOTAL_WIDTH * tile_size:
+			right_rect.width -= (right_rect.right - (x_offset + self.TOTAL_WIDTH * tile_size))
+		# Top main section (10x10)
+		top_rect = pygame.Rect(
+			x_offset + self.SIDE_WIDTH * tile_size,
+			y_offset,
+			self.MAIN_WIDTH * tile_size,
+			self.HEIGHT * tile_size
+		)
+		# Bottom main section (10x10)
+		bottom_rect = pygame.Rect(
+			x_offset + self.SIDE_WIDTH * tile_size,
+			y_offset + self.HEIGHT * tile_size,
+			self.MAIN_WIDTH * tile_size,
+			self.HEIGHT * tile_size
+		)
+
+		# Draw section outlines
+		for rect in [left_rect, right_rect, top_rect, bottom_rect]:
+			pygame.draw.rect(surface, self.OUTLINE_COLOR, rect, 4)
+
+		# Split left and right side sections in half horizontally (two 4x10 boxes each)
+		left_top_rect = pygame.Rect(left_rect.left, left_rect.top, left_rect.width, left_rect.height // 2)
+		left_bottom_rect = pygame.Rect(left_rect.left, left_rect.top + left_rect.height // 2, left_rect.width, left_rect.height // 2)
+		right_top_rect = pygame.Rect(right_rect.left, right_rect.top, right_rect.width, right_rect.height // 2)
+		right_bottom_rect = pygame.Rect(right_rect.left, right_rect.top + right_rect.height // 2, right_rect.width, right_rect.height // 2)
+
+		for rect in [left_top_rect, left_bottom_rect, right_top_rect, right_bottom_rect]:
+			pygame.draw.rect(surface, self.OUTLINE_COLOR, rect, 4)
+
+		# Draw grid lines (light)
+		# Top and bottom main sections
+		# Draw top section grid lines as usual
+		for x in range(top_rect.left, top_rect.right, tile_size):
+			pygame.draw.line(surface, self.GRID_COLOR, (x, top_rect.top), (x, top_rect.bottom), 1)
+		pygame.draw.line(surface, self.GRID_COLOR, (top_rect.right, top_rect.top), (top_rect.right, top_rect.bottom), 1)
+		for y in range(top_rect.top, top_rect.bottom, tile_size):
+			pygame.draw.line(surface, self.GRID_COLOR, (top_rect.left, y), (top_rect.right, y), 1)
+		# Draw the last horizontal line at the bottom edge of the top section
+		pygame.draw.line(surface, self.GRID_COLOR, (top_rect.left, top_rect.bottom - 1), (top_rect.right, top_rect.bottom - 1), 1)
+
+		# Draw bottom section grid lines, but skip the first horizontal line (shared with top)
+		for x in range(bottom_rect.left, bottom_rect.right, tile_size):
+			pygame.draw.line(surface, self.GRID_COLOR, (x, bottom_rect.top), (x, bottom_rect.bottom), 1)
+		pygame.draw.line(surface, self.GRID_COLOR, (bottom_rect.right, bottom_rect.top), (bottom_rect.right, bottom_rect.bottom), 1)
+		for y in range(bottom_rect.top + tile_size, bottom_rect.bottom, tile_size):
+			pygame.draw.line(surface, self.GRID_COLOR, (bottom_rect.left, y), (bottom_rect.right, y), 1)
+		# Draw the last horizontal line at the bottom edge of the bottom section
+		pygame.draw.line(surface, self.GRID_COLOR, (bottom_rect.left, bottom_rect.bottom - 1), (bottom_rect.right, bottom_rect.bottom - 1), 1)
+
+		# Left and right side sections
+		for section in [left_rect, right_rect]:
+			for x in range(section.left, section.right, tile_size):
+				pygame.draw.line(surface, self.GRID_COLOR, (x, section.top), (x, section.bottom), 1)
+			# Draw the last vertical line at the right edge
+			pygame.draw.line(surface, self.GRID_COLOR, (section.right, section.top), (section.right, section.bottom), 1)
+			for y in range(section.top, section.bottom, tile_size):
+				pygame.draw.line(surface, self.GRID_COLOR, (section.left, y), (section.right, y), 1)
+			# Draw the last horizontal line at the bottom edge
+			pygame.draw.line(surface, self.GRID_COLOR, (section.left, section.bottom - 1), (section.right, section.bottom - 1), 1)
