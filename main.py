@@ -27,6 +27,8 @@ from game.unit import Building, Marksman, Arclight, Crawler, spawn_crawlers  # I
 WINDOW_WIDTH = 800
 WINDOW_HEIGHT = 600
 FPS = 60
+# Simulation speed (seconds per frame)
+SIM_DT = 0.04  # Increase for faster simulation, decrease for slower (0.04 feels like a normal speed)
 
 TEAM_COLOR_TOP = (40, 40, 240)  
 TEAM_COLOR_BOTTOM = (40, 240, 40)
@@ -51,6 +53,7 @@ def find_closest_enemy(unit, enemy_units):
     return None, None
 
 def main():
+    victory_message = None
     def get_unit_size(unit_type):
         # Query the unit class for its size
         if unit_type == "Crawler":
@@ -108,6 +111,7 @@ def main():
         placement_buttons.append(Button(rect, label, font))
     placement_mode = None  # None or unit type string
 
+    sim_time = 0.0
     running = True
     while running:
         for event in pygame.event.get():
@@ -268,46 +272,62 @@ def main():
                 color = (80, 200, 80, 120) if valid else (200, 80, 80, 120)
                 pygame.draw.rect(screen, color, (px, py, tile_size, tile_size), border_radius=4)
 
-        current_time = pygame.time.get_ticks() / 1000.0
-        dt = clock.get_time() / 1000.0
+        dt = SIM_DT
+        sim_time += dt
+        current_time = sim_time
 
         if round_active:
             # Move units and remove dead ones
             team0_units[:] = [unit for unit in team0_units if getattr(unit, 'health', 1) > 0]
             team1_units[:] = [unit for unit in team1_units if getattr(unit, 'health', 1) > 0]
 
-            for unit in team0_units:
-                closest_enemy, enemy_pixel = find_closest_enemy(unit, team1_units)
-                if closest_enemy:
-                    unit.move_toward(enemy_pixel, target_unit=closest_enemy, allies=team0_units, dt=dt)
-                    dist = ((unit.pixel_pos[0] - closest_enemy.pixel_pos[0]) ** 2 + (unit.pixel_pos[1] - closest_enemy.pixel_pos[1]) ** 2) ** 0.5
-                    if hasattr(unit, 'collider_radius') and hasattr(closest_enemy, 'collider_radius'):
-                        melee_contact = unit.collider_radius + closest_enemy.collider_radius
-                        if dist <= melee_contact or dist <= unit.attack_range:
-                            if getattr(unit, 'is_ranged', False):
-                                unit.attack(closest_enemy, current_time, projectiles=projectiles, all_units=team1_units)
-                            else:
-                                unit.attack(closest_enemy, current_time)
+            # Check victory condition
+            if not team0_units:
+                victory_message = "Team 1 Wins!"
+                round_active = False
+            elif not team1_units:
+                victory_message = "Team 0 Wins!"
+                round_active = False
 
-            for unit in team1_units:
-                closest_enemy, enemy_pixel = find_closest_enemy(unit, team0_units)
-                if closest_enemy:
-                    unit.move_toward(enemy_pixel, target_unit=closest_enemy, allies=team1_units, dt=dt)
-                    unit.update(tile_size, x_offset, y_offset)
-                    dist = ((unit.pixel_pos[0] - closest_enemy.pixel_pos[0]) ** 2 + (unit.pixel_pos[1] - closest_enemy.pixel_pos[1]) ** 2) ** 0.5
-                    if hasattr(unit, 'collider_radius') and hasattr(closest_enemy, 'collider_radius'):
-                        melee_contact = unit.collider_radius + closest_enemy.collider_radius
-                        if dist <= melee_contact or dist <= unit.attack_range:
-                            if getattr(unit, 'is_ranged', False):
-                                unit.attack(closest_enemy, current_time, projectiles=projectiles, all_units=team0_units)
-                            else:
-                                unit.attack(closest_enemy, current_time)
+            if round_active:
+                for unit in team0_units:
+                    closest_enemy, enemy_pixel = find_closest_enemy(unit, team1_units)
+                    if closest_enemy:
+                        unit.move_toward(enemy_pixel, target_unit=closest_enemy, allies=team0_units, dt=dt)
+                        dist = ((unit.pixel_pos[0] - closest_enemy.pixel_pos[0]) ** 2 + (unit.pixel_pos[1] - closest_enemy.pixel_pos[1]) ** 2) ** 0.5
+                        if hasattr(unit, 'collider_radius') and hasattr(closest_enemy, 'collider_radius'):
+                            melee_contact = unit.collider_radius + closest_enemy.collider_radius
+                            if dist <= melee_contact or dist <= unit.attack_range:
+                                if getattr(unit, 'is_ranged', False):
+                                    unit.attack(closest_enemy, current_time, projectiles=projectiles, all_units=team1_units)
+                                else:
+                                    unit.attack(closest_enemy, current_time)
 
-            for projectile in projectiles[:]:
-                projectile.update(dt)
-                projectile.draw(screen)
-                if not projectile.active:
-                    projectiles.remove(projectile)
+                for unit in team1_units:
+                    closest_enemy, enemy_pixel = find_closest_enemy(unit, team0_units)
+                    if closest_enemy:
+                        unit.move_toward(enemy_pixel, target_unit=closest_enemy, allies=team1_units, dt=dt)
+                        unit.update(tile_size, x_offset, y_offset)
+                        dist = ((unit.pixel_pos[0] - closest_enemy.pixel_pos[0]) ** 2 + (unit.pixel_pos[1] - closest_enemy.pixel_pos[1]) ** 2) ** 0.5
+                        if hasattr(unit, 'collider_radius') and hasattr(closest_enemy, 'collider_radius'):
+                            melee_contact = unit.collider_radius + closest_enemy.collider_radius
+                            if dist <= melee_contact or dist <= unit.attack_range:
+                                if getattr(unit, 'is_ranged', False):
+                                    unit.attack(closest_enemy, current_time, projectiles=projectiles, all_units=team0_units)
+                                else:
+                                    unit.attack(closest_enemy, current_time)
+
+                for projectile in projectiles[:]:
+                    projectile.update(dt)
+                    projectile.draw(screen)
+                    if not projectile.active:
+                        projectiles.remove(projectile)
+
+        # Draw victory message if any
+        if victory_message:
+            msg_surf = font.render(victory_message, True, (255, 255, 0))
+            msg_rect = msg_surf.get_rect(center=(WINDOW_WIDTH // 2, 60))
+            screen.blit(msg_surf, msg_rect)
 
         pygame.display.flip()
         clock.tick(FPS)
