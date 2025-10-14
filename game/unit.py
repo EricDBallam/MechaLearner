@@ -160,20 +160,18 @@ class Marksman(Unit, pygame.sprite.Sprite):
         Unit.__init__(self, grid_pos, team, health, max_health, movement_speed_mps, attack_power, attack_range_m, attack_splash_range_m, attack_interval, size=size, color=color, tile_size=tile_size, tile_size_m=tile_size_m)
         pygame.sprite.Sprite.__init__(self)
         self.angle = 0  # Degrees
-
-        self.is_ranged = True   
-
+        self.is_ranged = True
         self.tile_size = tile_size
-        
-        # Create a circular sprite with an arrow
-        diameter = max(size) * tile_size
+        self.update_sprite(tile_size)
+
+    def update_sprite(self, tile_size):
+        self.tile_size = tile_size
+        diameter = max(self.size) * tile_size
         self.image = pygame.Surface((diameter, diameter), pygame.SRCALPHA)
-        center = diameter // 2 + 2
+        center = diameter // 2
         radius = diameter // 2 - 2
-        
-        # Draw circle
+        # Draw main body circle
         pygame.draw.circle(self.image, self.color, (center, center), radius)
-        
         # Draw arrow (triangle) pointing up (forward)
         arrow_color = (30, 30, 30)
         arrow_height = int(radius * 0.7)
@@ -184,9 +182,7 @@ class Marksman(Unit, pygame.sprite.Sprite):
         pygame.draw.polygon(self.image, arrow_color, [point, left, right])
         self.original_image = self.image.copy()
         self.rect = self.image.get_rect()
-        self.update_rect_position(tile_size=32, x_offset=0, y_offset=0)
-        
-        # For circle collider
+        self.update_rect_position(tile_size, 0, 0)
         self.collider_center = (self.rect.x + center, self.rect.y + center)
         self.collider_radius = radius
 
