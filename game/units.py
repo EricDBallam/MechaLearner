@@ -1,9 +1,11 @@
 import pygame
 import math
 
-
 class Unit:
-    def __init__(self, grid_pos, team, health, max_health, movement_speed_mps, attack_power, attack_range_m, attack_splash_range_m, attack_interval=1.0, size=(1, 1), color=None, tile_size=27, tile_size_m=10, pixel_position=None):
+    def __init__(self, grid_pos, team, health, max_health, movement_speed_mps, 
+                 attack_power, attack_range_m, attack_splash_range_m, attack_interval=1.0, 
+                 size=(1, 1), color=None, tile_size=27, tile_size_m=10, pixel_position=None):
+        
         self.grid_pos = grid_pos      # (grid_x, grid_y)
         self.team = team             # 0 or 1
         self.health = health
@@ -26,10 +28,31 @@ class Unit:
         else:
             self.pixel_pos = self.grid_to_pixel(grid_pos, tile_size)
 
+        self.starting_pixel_pos = self.pixel_pos
+
     def grid_to_pixel(self, grid_pos, tile_size):
         x, y = grid_pos
         return ((x - 1) * tile_size, (y - 1) * tile_size)
+
+    def get_units(self):
+        return [self]
     
+    def act(self, allies, enemies, tile_size, x_offset, y_offset, current_time, dt, projectiles):
+        closest_enemy, enemy_pixel = self.find_closest_enemy(enemies)
+        if closest_enemy:
+            # Use collider_center for movement and attack checks
+            target_center = getattr(closest_enemy, 'collider_center', enemy_pixel)
+            self_center = getattr(self, 'collider_center', self.pixel_pos)
+            self.move_toward(target_center, target_unit=closest_enemy, allies=allies, dt=dt)
+            self.update_rect_position(tile_size, x_offset, y_offset)
+            dist = math.hypot(self_center[0] - target_center[0], self_center[1] - target_center[1])
+            if hasattr(self, 'collider_radius') and hasattr(closest_enemy, 'collider_radius'):
+                melee_contact = self.collider_radius + closest_enemy.collider_radius
+                if dist <= melee_contact or dist <= self.attack_range:
+                    if getattr(self, 'is_ranged', False):
+                        self.attack(closest_enemy, current_time, projectiles=projectiles, all_units=enemies)
+                    else:
+                        self.attack(closest_enemy, current_time)
 
     def update_rect_position(self, tile_size, x_offset, y_offset):
         if hasattr(self, 'rect'):
@@ -37,39 +60,40 @@ class Unit:
             self.rect.y = int(self.pixel_pos[1] + y_offset)
             self.rect.width = int(self.size[0] * tile_size)
             self.rect.height = int(self.size[1] * tile_size)
+            # Set collider center and radius
+            self.collider_center = (self.rect.x + self.rect.width // 2, self.rect.y + self.rect.height // 2)
+            self.collider_radius = min(self.rect.width, self.rect.height) // 2 - 2
 
 
     def move_toward(self, target_pixel, dt, target_unit=None, stop_distance=1, allies=None, avoidance_radius=None, avoidance_strength=1.0):
-        dx = target_pixel[0] - self.pixel_pos[0]
-        dy = target_pixel[1] - self.pixel_pos[1]
+        # Use collider_center for movement
+        self_center = getattr(self, 'collider_center', self.pixel_pos)
+        dx = target_pixel[0] - self_center[0]
+        dy = target_pixel[1] - self_center[1]
         dist = math.hypot(dx, dy)
         # Use collider radii for stop distance if target_unit is present
         if target_unit and hasattr(self, 'collider_radius') and hasattr(target_unit, 'collider_radius'):
             stop_distance = self.collider_radius + target_unit.collider_radius
         # Stop if within attack range of target_unit
         if target_unit is not None:
-            # Use pixel distance for attack range
             if dist <= self.attack_range:
                 return
         if dist <= stop_distance:
-            # Stop moving entirely when within stop_distance
             return
         # Local avoidance force
         avoidance_dx, avoidance_dy = 0, 0
         if avoidance_radius is None:
-            # Use the largest dimension of the unit in pixels
             avoidance_radius = max(self.size) * self.movement_speed / ((self.movement_speed / self.size[0]) if self.size[0] else 1)
         if allies:
             avoidance_dx, avoidance_dy = self.compute_avoidance_force(allies, avoidance_radius, avoidance_strength)
-        # Combine movement and avoidance
         move_amount = self.movement_speed * dt
         total_dx = move_amount * dx / dist + avoidance_dx
         total_dy = move_amount * dy / dist + avoidance_dy
+        # Move pixel_pos so that collider_center moves as intended
         self.pixel_pos = (
             self.pixel_pos[0] + total_dx,
             self.pixel_pos[1] + total_dy
         )
-        # Clamp to board after moving
         if hasattr(self, 'board_width') and hasattr(self, 'board_height'):
             self.clamp_to_board(self.board_width, self.board_height)
 
@@ -97,6 +121,37 @@ class Unit:
                 force_x += repulse * dx / distance
                 force_y += repulse * dy / distance
         return force_x, force_y
+    
+    def find_closest_enemy(self, enemy_units):
+        min_dist = float('inf')
+        closest = None
+        ux, uy = self.pixel_pos
+        for enemy in enemy_units:
+            if hasattr(enemy, 'get_positions'):
+                positions = enemy.get_positions()
+            else:
+                positions = [enemy.grid_pos]
+            for ex, ey in positions:
+                if hasattr(enemy, 'pixel_pos'):
+                    ex_pix, ey_pix = enemy.pixel_pos
+                else:
+                    ex_pix, ey_pix = ex, ey
+                dist = ((ux - ex_pix) ** 2 + (uy - ey_pix) ** 2) ** 0.5
+                if dist < min_dist:
+                    min_dist = dist
+                    closest = enemy
+        if closest:
+            if hasattr(closest, 'pixel_pos'):
+                return closest, closest.pixel_pos
+            elif hasattr(closest, 'get_positions'):
+                pos = closest.get_positions()
+                if pos:
+                    return closest, pos[0]
+                else:
+                    return closest, (0, 0)
+            else:
+                return closest, (closest.grid_pos[0], closest.grid_pos[1])
+        return None, None
 
         
 
@@ -118,7 +173,9 @@ class Unit:
                     start_pos=(start_x, start_y),
                     target_unit=target,
                     damage=self.attack_power,
-                    speed=400
+                    speed=400,
+                    splash_range=self.attack_splash_range,
+                    all_units=all_units
                 )
                 projectiles.append(projectile)
             else:
@@ -186,24 +243,6 @@ class Marksman(Unit, pygame.sprite.Sprite):
         self.collider_center = (self.rect.x + center, self.rect.y + center)
         self.collider_radius = radius
 
-    def rotate(self, angle):
-        self.angle = angle % 360
-        self.image = pygame.transform.rotate(self.original_image, -self.angle)
-        self.rect = self.image.get_rect(center=self.rect.center)
-
-    def move_forward(self, tile_size, x_offset=0, y_offset=0):
-        # Move in the direction of self.angle
-        import math
-        dx = math.cos(math.radians(self.angle)) * self.movement_speed
-        dy = -math.sin(math.radians(self.angle)) * self.movement_speed
-        # Convert to grid position
-        pixel_x = (self.rect.x + dx)
-        pixel_y = (self.rect.y + dy)
-        grid_x = int((pixel_x - x_offset) / tile_size) + 1
-        grid_y = int((pixel_y - y_offset) / tile_size) + 1
-        self.grid_pos = (grid_x, grid_y)
-        self.update_rect_position(tile_size, x_offset, y_offset)
-
     def update(self, tile_size, x_offset=0, y_offset=0):
         self.update_rect_position(tile_size, x_offset, y_offset)
 
@@ -223,7 +262,6 @@ class Marksman(Unit, pygame.sprite.Sprite):
 
 
 class Arclight(Unit, pygame.sprite.Sprite):
-    
     def __init__(self, grid_pos, team, health=4813, max_health=4813, movement_speed_mps=7, attack_power=347, attack_range_m=70, attack_interval=0.9, attack_splash_range_m=7, size=(2, 2), color=(200, 200, 200), tile_size=32, tile_size_m=10):
         Unit.__init__(self, grid_pos, team, health, max_health, movement_speed_mps, attack_power, attack_range_m, attack_splash_range_m, attack_interval, size=size, color=color, tile_size=tile_size, tile_size_m=tile_size_m)
         pygame.sprite.Sprite.__init__(self)
@@ -258,6 +296,9 @@ class Arclight(Unit, pygame.sprite.Sprite):
             self.rect.y = int(self.pixel_pos[1] + y_offset)
             self.rect.width = int(self.size[0] * tile_size)
             self.rect.height = int(self.size[1] * tile_size)
+            # Set collider center and radius
+            self.collider_center = (self.rect.x + self.rect.width // 2, self.rect.y + self.rect.height // 2)
+            self.collider_radius = min(self.rect.width, self.rect.height) // 2 - 2
 
     def rotate(self, angle):
         self.angle = angle % 360
@@ -278,29 +319,8 @@ class Arclight(Unit, pygame.sprite.Sprite):
             return distance < (self.collider_radius + other_sprite.collider_radius)
         else:
             return self.rect.colliderect(other_sprite.rect)
-        
-    def attack(self, target, current_time, projectiles=None, all_units=None):
-        # Only attack if enough time has passed since last attack
-        if self.alive and target.alive and (current_time - self.last_attack_time >= self.attack_interval):
-            if projectiles is not None and getattr(self, 'is_ranged', False):
-                # Ranged attack: spawn projectile with splash
-                start_x = self.rect.x + self.rect.width // 2
-                start_y = self.rect.y + self.rect.height // 2
-                projectile = Projectile(
-                    start_pos=(start_x, start_y),
-                    target_unit=target,
-                    damage=self.attack_power,
-                    speed=350,
-                    splash_range=self.attack_splash_range,
-                    all_units=all_units
-                )
-                projectiles.append(projectile)
-            else:
-                # Melee attack: apply damage directly
-                target.take_damage(self.attack_power)
-            self.last_attack_time = current_time
 
-      
+
 class Crawler(Unit, pygame.sprite.Sprite):
     def __init__(self, grid_pos, team, health=263, max_health=263, movement_speed_mps=16, attack_power=79, attack_range_m=0, attack_splash_range_m=0, attack_interval=0.6, color=(100, 200, 100), tile_size=32, tile_size_m=10, pixel_position=None):
         # movement_speed_mps=16 means 16 meters/sec, attack_range_m=2 means 2 meters
@@ -330,14 +350,10 @@ class Crawler(Unit, pygame.sprite.Sprite):
         pygame.draw.polygon(self.image, arrow_color, [point, left, right])
         self.original_image = self.image.copy()
         self.rect = self.image.get_rect()
+        self._visual_center_offset = center
         self.update_rect_position(tile_size, 0, 0)
         self.collider_center = (self.rect.x + center, self.rect.y + center)
         self.collider_radius = radius
-
-    def rotate(self, angle):
-        self.angle = angle % 360
-        self.image = pygame.transform.rotate(self.original_image, -self.angle)
-        self.rect = self.image.get_rect(center=self.rect.center)
 
     def update(self, tile_size, x_offset=0, y_offset=0):
         self.update_rect_position(tile_size, x_offset, y_offset)
@@ -356,6 +372,11 @@ class Crawler(Unit, pygame.sprite.Sprite):
             self.rect.y = int(self.pixel_pos[1] + offset_y)
             self.rect.width = int(self.size[0] * tile_size)
             self.rect.height = int(self.size[1] * tile_size)
+            # Set collider center to match visual center
+            if hasattr(self, '_visual_center_offset'):
+                self.collider_center = (self.rect.x + self._visual_center_offset, self.rect.y + self._visual_center_offset)
+            else:
+                self.collider_center = (self.rect.x + self.rect.width // 2, self.rect.y + self.rect.height // 2)
 
     def check_collision(self, other_sprite):
         if hasattr(other_sprite, 'collider_center') and hasattr(other_sprite, 'collider_radius'):
@@ -367,37 +388,64 @@ class Crawler(Unit, pygame.sprite.Sprite):
             return self.rect.colliderect(other_sprite.rect)
 
 
-def spawn_crawlers(start_grid_pos, team, tile_size=32, color=(100, 200, 100)):
-    crawlers = []
-    # 2 rows (y), 5 columns (x), 2 crawlers per tile (top-left and bottom-right)
-    for dy in range(2):
-        for dx in range(5):
-            grid_x = start_grid_pos[0] + dx
-            grid_y = start_grid_pos[1] + dy
-            # Top-left position
-            crawler_topleft = Crawler(
-                grid_pos=(grid_x, grid_y),
-                team=team,
-                color=color,
-                tile_size=tile_size,
-                pixel_position=( (grid_x - 1) * tile_size, (grid_y - 1) * tile_size )
-            )
-            crawlers.append(crawler_topleft)
-            # Bottom-right position: adjust pixel_pos directly
-            crawler_bottomright = Crawler(
-                grid_pos=(grid_x, grid_y),
-                team=team,
-                color=color,
-                tile_size=tile_size,
-                pixel_position=( (grid_x - 1) * tile_size, (grid_y - 1) * tile_size )
-            )
-            crawler_bottomright.pixel_pos = (
-                crawler_bottomright.pixel_pos[0] + tile_size // 2,
-                crawler_bottomright.pixel_pos[1] + tile_size // 2
-            )
-            crawlers.append(crawler_bottomright)
+class CrawlerGroup:
+    def __init__(self, start_grid_pos, team, tile_size=32, color=(100, 200, 100)):
+        self.unit_type = "CrawlerGroup"
+        self.start_grid_pos = start_grid_pos
+        self.team = team
+        self.tile_size = tile_size
+        self.color = color
+        self.width = 5
+        self.height = 2
+        self.size = (self.width, self.height)
+        self.crawlers = self._spawn_crawlers()
 
-    return crawlers
+    def _spawn_crawlers(self):
+        crawlers = []
+        for dy in range(self.height):
+            for dx in range(self.width):
+                grid_x = self.start_grid_pos[0] + dx
+                grid_y = self.start_grid_pos[1] + dy
+                # Top-left position
+                crawler_topleft = Crawler(
+                    grid_pos=(grid_x, grid_y),
+                    team=self.team,
+                    color=self.color,
+                    tile_size=self.tile_size,
+                    pixel_position=((grid_x - 1) * self.tile_size, (grid_y - 1) * self.tile_size)
+                )
+                crawlers.append(crawler_topleft)
+                # Bottom-right position: adjust pixel_pos directly
+                crawler_bottomright = Crawler(
+                    grid_pos=(grid_x, grid_y),
+                    team=self.team,
+                    color=self.color,
+                    tile_size=self.tile_size,
+                    pixel_position=((grid_x - 1) * self.tile_size, (grid_y - 1) * self.tile_size)
+                )
+                crawler_bottomright.pixel_pos = (
+                    crawler_bottomright.pixel_pos[0] + self.tile_size // 2,
+                    crawler_bottomright.pixel_pos[1] + self.tile_size // 2
+                )
+                crawlers.append(crawler_bottomright)
+        return crawlers
+
+    def get_units(self):
+        return self.crawlers
+    
+    def find_closest_enemy(self, enemy_units):
+        for crawler in self.crawlers:
+            if not crawler.alive:
+                continue
+            crawler.find_closest_enemy(enemy_units)
+    
+    def get_positions(self):
+        # Return all grid positions of crawlers in the group
+        return [crawler.grid_pos for crawler in self.crawlers if crawler.alive]
+
+    def is_alive(self):
+        # Group is alive if any crawler is alive
+        return any(crawler.alive for crawler in self.crawlers)
 
 
 

@@ -16,13 +16,17 @@ class Board:
     DEFAULT_OUTLINE_BOTTOM = (40, 40, 240)   # Bottom 10x10 main section
     GRID_COLOR = (80, 80, 80)          # Light grid lines
 
-    def __init__(self, surface, show_grid=True, outline_top=None, outline_bottom=None):
+    def __init__(self, surface, show_grid=True, outline_top=None, outline_bottom=None, window_width=800, window_height=600):
         self.show_grid = show_grid
         self.OUTLINE_TOP = outline_top if outline_top is not None else self.DEFAULT_OUTLINE_TOP
         self.OUTLINE_BOTTOM = outline_bottom if outline_bottom is not None else self.DEFAULT_OUTLINE_BOTTOM
         self.tile_size = 32
 
-        self.window_width, self.window_height = surface.get_size()
+        if surface is not None:
+            self.window_width, self.window_height = surface.get_size()
+        else:
+            self.window_width = window_width
+            self.window_height = window_height
         # Scale board to 90% of window size for margin
         board_scale = 0.9
         scaled_width = int(self.window_width * board_scale)
