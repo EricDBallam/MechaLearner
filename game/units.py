@@ -83,16 +83,7 @@ class Unit:
         # Local avoidance force
         avoidance_dx, avoidance_dy = 0, 0
         if avoidance_radius is None:
-            # Avoid division by zero: if movement_speed or size[0] are zero, fall back to a default radius
-            try:
-                denom = (self.movement_speed / self.size[0]) if (self.movement_speed != 0 and self.size[0]) else None
-            except Exception:
-                denom = None
-            if denom and denom != 0:
-                avoidance_radius = max(self.size) * self.movement_speed / denom
-            else:
-                # reasonable default: a few tiles worth of pixels
-                avoidance_radius = max(32, max(self.size) * 32)
+            avoidance_radius = max(self.size) * self.movement_speed / ((self.movement_speed / self.size[0]) if self.size[0] else 1)
         if allies:
             avoidance_dx, avoidance_dy = self.compute_avoidance_force(allies, avoidance_radius, avoidance_strength)
         move_amount = self.movement_speed * dt
@@ -200,49 +191,29 @@ class Unit:
 
 
 class Building(Unit, pygame.sprite.Sprite):
-    def __init__(self, grid_pos, team, health=200, max_health=200, attack_interval=1.0, color=None):
+
+    def __init__(self, grid_pos, team, health=200, max_health=200, attack_interval=1.0, tile_size=32, color=None):
         Unit.__init__(self, grid_pos, team, health, max_health, movement_speed_mps=0, attack_power=0, attack_range_m=0, attack_splash_range_m=0, attack_interval=attack_interval, size=(2, 2), color=color if color is not None else ((100, 100, 255) if team == 0 else (255, 100, 100)))
         pygame.sprite.Sprite.__init__(self)
-        self.image = pygame.Surface((self.size[0]*32, self.size[1]*32), pygame.SRCALPHA)
+        self.image = pygame.Surface((self.size[0]*tile_size, self.size[1]*tile_size), pygame.SRCALPHA)
         pygame.draw.rect(self.image, self.color, self.image.get_rect())
         self.rect = self.image.get_rect()
         self.update_rect_position(tile_size=32, x_offset=0, y_offset=0)
 
     def draw(self, surface):
-        # Draw a 2x2 square for the building, using 1-based grid position and board offset
-        # Use the sprite-based draw like other units
-        # Ensure rect is up-to-date (other code should call update before draw)
-        surface.blit(self.image, self.rect)
-        
+        surface.blit(self.image, self.rect)    
+
     def update_sprite(self):
         pass
 
     def update(self, tile_size, x_offset=0, y_offset=0):
-        # Keep the rect in sync with pixel_pos and offsets like other units
         self.update_rect_position(tile_size, x_offset, y_offset)
 
     def move_toward(self, *args, **kwargs):
-        # Buildings are immobile. Override movement to be a no-op.
         return
 
-    def act(self, allies, enemies, tile_size, x_offset, y_offset, current_time, dt, projectiles):
-        # Buildings should not move. They may still attack if given attack behavior.
-        # We'll keep a minimal act implementation that only handles attacking nearby enemies.
-        closest_enemy, enemy_pixel = self.find_closest_enemy(enemies)
-        if closest_enemy:
-            target_center = getattr(closest_enemy, 'collider_center', enemy_pixel)
-            # Update rect so collision/attack ranges are accurate
-            self.update_rect_position(tile_size, x_offset, y_offset)
-            # Use distance from building center to target
-            self_center = getattr(self, 'collider_center', (self.pixel_pos[0], self.pixel_pos[1]))
-            dist = math.hypot(self_center[0] - target_center[0], self_center[1] - target_center[1])
-            if hasattr(self, 'collider_radius') and hasattr(closest_enemy, 'collider_radius'):
-                melee_contact = self.collider_radius + closest_enemy.collider_radius
-                if dist <= melee_contact or dist <= self.attack_range:
-                    if getattr(self, 'is_ranged', False):
-                        self.attack(closest_enemy, current_time, projectiles=projectiles, all_units=enemies)
-                    else:
-                        self.attack(closest_enemy, current_time)
+    def act(self, *args, **kwargs):
+        pass
 
 
 class Marksman(Unit, pygame.sprite.Sprite):
