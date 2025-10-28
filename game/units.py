@@ -22,6 +22,8 @@ class Unit:
         self.size = size             # (width, height) in grid cells
         self.alive = True
         self.color = color if color is not None else ((200, 200, 200) if team == 0 else (200, 100, 100))
+
+        self.enemy_target = None  # Current target enemy unit
         
         if pixel_position is not None:
             self.pixel_pos = pixel_position
@@ -37,7 +39,59 @@ class Unit:
     def get_units(self):
         return [self]
     
-    def act(self, allies, enemies, tile_size, x_offset, y_offset, current_time, dt, projectiles):
+    # def act(self, allies, enemies, tile_size, x_offset, y_offset, current_time, dt, projectiles):
+        
+        # If we already have a target, prefer it until it dies or moves out of range.
+        if self.enemy_target is not None:
+            target = self.enemy_target
+            # If the target is gone or dead, drop it
+            if not getattr(target, "alive", True):
+                self.enemy_target = None
+            else:
+                # Resolve a sensible target center in pixels
+                if hasattr(target, "collider_center"):
+                    target_center = target.collider_center
+                elif hasattr(target, "rect"):
+                    target_center = (target.rect.x + target.rect.width // 2,
+                                    target.rect.y + target.rect.height // 2)
+                elif hasattr(target, "pixel_pos"):
+                    target_center = target.pixel_pos
+                elif hasattr(target, "get_positions"):
+                    pos_list = target.get_positions()
+                    target_center = pos_list[0] if pos_list else (0, 0)
+                else:
+                    # fallback: try grid_pos as pixels (existing code uses grid_to_pixel elsewhere)
+                    target_center = getattr(target, "grid_pos", (0, 0))
+
+                # Use our collider center if available for distance checks
+                self_center = getattr(self, "collider_center", self.pixel_pos)
+                dist = math.hypot(self_center[0] - target_center[0], self_center[1] - target_center[1])
+
+                # compute melee contact if both units have collider radii
+                melee_contact = None
+                if hasattr(self, "collider_radius") and hasattr(target, "collider_radius"):
+                    melee_contact = self.collider_radius + target.collider_radius
+
+                # If target is still in (attack or melee) range, continue focusing and attack.
+                in_melee = melee_contact is not None and dist <= melee_contact
+                in_range = dist <= self.attack_range
+
+                if in_melee or in_range:
+                    # Move toward target center for proper positioning (keeps current target)
+                    # This replicates the original movement call but uses self.enemy_target
+                    self.move_toward(target_center, target_unit=target, allies=allies, dt=dt)
+                    self.update_rect_position(tile_size, x_offset, y_offset)
+
+                    # Attack as before (ranged uses projectile path)
+                    if getattr(self, "is_ranged", False):
+                        self.attack(target, current_time, projectiles=projectiles, all_units=enemies)
+                    else:
+                        self.attack(target, current_time)
+                    return  # keep focusing this target; skip normal target acquisition this tick
+                else:
+                    # Target moved out of allowable attack range -> drop it and resume normal logic
+                    self.enemy_target = None
+
         closest_enemy, enemy_pixel = self.find_closest_enemy(enemies)
         if closest_enemy:
             # Use collider_center for movement and attack checks
@@ -53,6 +107,90 @@ class Unit:
                         self.attack(closest_enemy, current_time, projectiles=projectiles, all_units=enemies)
                     else:
                         self.attack(closest_enemy, current_time)
+
+    def act(self, allies, enemies, tile_size, x_offset, y_offset, current_time, dt, projectiles):
+        target = self.enemy_target
+
+        # --- 1. Check existing target (Focusing) ---
+        if target is not None:
+            # If the target is gone or dead, drop it
+            if not getattr(target, "alive", True):
+                self.enemy_target = None
+                target = None # Clear target for next step
+
+            else:
+                target_center = self._resolve_target_center(target)
+                # If target is still in (attack or melee) range, continue focusing and attack.
+                if self._perform_action_on_target(target, target_center, allies, enemies, tile_size, x_offset, y_offset, current_time, dt, projectiles):
+                    return  # Keep focusing this target; skip normal target acquisition this tick
+                else:
+                    # Target moved out of allowable attack range -> drop it and resume normal logic
+                    self.enemy_target = None
+                    target = None
+
+        # --- 2. Find and engage new target (Acquisition) ---
+        if target is None:
+            closest_enemy, enemy_pixel = self.find_closest_enemy(enemies)
+            
+            if closest_enemy:
+                target = closest_enemy
+                # Use collider_center for movement and attack checks
+                target_center = getattr(target, 'collider_center', enemy_pixel)
+                
+                # Perform the move/attack action on the newly acquired target
+                self._perform_action_on_target(target, target_center, allies, enemies, tile_size, x_offset, y_offset, current_time, dt, projectiles)
+
+    def _resolve_target_center(self, target):
+        """Resolves the pixel center position of a target unit."""
+        if hasattr(target, "collider_center"):
+            return target.collider_center
+        elif hasattr(target, "rect"):
+            return (target.rect.x + target.rect.width // 2,
+                    target.rect.y + target.rect.height // 2)
+        elif hasattr(target, "pixel_pos"):
+            return target.pixel_pos
+        elif hasattr(target, "get_positions"):
+            pos_list = target.get_positions()
+            # If get_positions returns a list of pixel positions, take the first one.
+            # If it returns a list of grid positions, grid_to_pixel would be needed, 
+            # but given the context, we'll assume it returns pixel positions for simplification.
+            # *Based on your existing code, target_center is set to grid_pos 
+            # as a fallback, which is handled in the final 'else'.
+            return pos_list[0] if pos_list else (0, 0)
+        else:
+            # fallback: use grid_pos (assuming it is handled elsewhere or is not the primary case)
+            return self.grid_to_pixel(getattr(target, "grid_pos", (0, 0)), 
+                                      getattr(self, "tile_size", 27)) # Need tile_size, maybe pass in, or assume self has it
+                                                                    # Used 27 as a default from __init__
+
+    def _perform_action_on_target(self, target, target_center, allies, enemies, tile_size, x_offset, y_offset, current_time, dt, projectiles):
+        """Moves toward and attacks a target if in range, returns True if an action was taken."""
+        
+        self_center = getattr(self, "collider_center", self.pixel_pos)
+        dist = math.hypot(self_center[0] - target_center[0], self_center[1] - target_center[1])
+
+        # Compute melee contact if both units have collider radii
+        melee_contact = None
+        if hasattr(self, "collider_radius") and hasattr(target, "collider_radius"):
+            melee_contact = self.collider_radius + target.collider_radius
+
+        in_melee = melee_contact is not None and dist <= melee_contact
+        in_range = dist <= self.attack_range
+
+        # Always call move_toward to move into attack range if not already in it
+        self.move_toward(target_center, target_unit=target, allies=allies, dt=dt)
+        self.update_rect_position(tile_size, x_offset, y_offset)
+
+        # Check if we should attack
+        if in_melee or in_range:
+            self.enemy_target = target # Ensure target is set before attack
+            if getattr(self, "is_ranged", False):
+                self.attack(target, current_time, projectiles=projectiles, all_units=enemies)
+            else:
+                self.attack(target, current_time)
+            return True
+        
+        return False
 
     def update_rect_position(self, tile_size, x_offset, y_offset):
         if hasattr(self, 'rect'):
@@ -165,6 +303,7 @@ class Unit:
     def attack(self, target, current_time, projectiles=None, all_units=None):
         # Only attack if enough time has passed since last attack
         if self.alive and target.alive and (current_time - self.last_attack_time >= self.attack_interval):
+            self.enemy_target = target # Set current target
             if projectiles is not None and getattr(self, 'is_ranged', False):
                 # Ranged attack: spawn projectile
                 start_x = self.rect.x + self.rect.width // 2
@@ -191,8 +330,8 @@ class Unit:
 
 
 class Building(Unit, pygame.sprite.Sprite):
-
-    def __init__(self, grid_pos, team, health=200, max_health=200, attack_interval=1.0, tile_size=32, color=None):
+    GRID_SIZE = (2, 2)
+    def __init__(self, grid_pos, team, health=3400, max_health=3400, attack_interval=1.0, tile_size=32, color=None):
         Unit.__init__(self, grid_pos, team, health, max_health, movement_speed_mps=0, attack_power=0, attack_range_m=0, attack_splash_range_m=0, attack_interval=attack_interval, size=(2, 2), color=color if color is not None else ((100, 100, 255) if team == 0 else (255, 100, 100)))
         pygame.sprite.Sprite.__init__(self)
         self.image = pygame.Surface((self.size[0]*tile_size, self.size[1]*tile_size), pygame.SRCALPHA)
@@ -217,6 +356,7 @@ class Building(Unit, pygame.sprite.Sprite):
 
 
 class Marksman(Unit, pygame.sprite.Sprite):
+    GRID_SIZE = (2, 2)
     def __init__(self, grid_pos, team, health=1922, max_health=1922, movement_speed_mps=8, attack_power=2326, attack_range_m=120, attack_splash_range_m=0, attack_interval=3.1, size=(2, 2), color=(200, 200, 50), tile_size=32, tile_size_m=10):
         Unit.__init__(self, grid_pos, team, health, max_health, movement_speed_mps, attack_power, attack_range_m, attack_splash_range_m, attack_interval, size=size, color=color, tile_size=tile_size, tile_size_m=tile_size_m)
         pygame.sprite.Sprite.__init__(self)
@@ -266,6 +406,7 @@ class Marksman(Unit, pygame.sprite.Sprite):
 
 
 class Arclight(Unit, pygame.sprite.Sprite):
+    GRID_SIZE = (2, 2)
     def __init__(self, grid_pos, team, health=4813, max_health=4813, movement_speed_mps=7, attack_power=347, attack_range_m=70, attack_interval=0.9, attack_splash_range_m=7, size=(2, 2), color=(200, 200, 200), tile_size=32, tile_size_m=10):
         Unit.__init__(self, grid_pos, team, health, max_health, movement_speed_mps, attack_power, attack_range_m, attack_splash_range_m, attack_interval, size=size, color=color, tile_size=tile_size, tile_size_m=tile_size_m)
         pygame.sprite.Sprite.__init__(self)
@@ -393,9 +534,10 @@ class Crawler(Unit, pygame.sprite.Sprite):
 
 
 class CrawlerGroup:
-    def __init__(self, start_grid_pos, team, tile_size=32, color=(100, 200, 100)):
+    GRID_SIZE = (2, 5)
+    def __init__(self, grid_pos, team, tile_size=32, color=(100, 200, 100)):
         self.unit_type = "CrawlerGroup"
-        self.start_grid_pos = start_grid_pos
+        self.start_grid_pos = grid_pos
         self.team = team
         self.tile_size = tile_size
         self.color = color

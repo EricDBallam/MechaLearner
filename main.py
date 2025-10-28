@@ -52,27 +52,10 @@ def setup_game():
 
     return board
 
-
-def mk_marksman(grid_pos, team, color, board):
-    print(f"Creating Marksman at {grid_pos} for team {team}")
-    # Marksman expects tile_size kw
-    new_marksman = Marksman(grid_pos=grid_pos, team=team, color=color, tile_size=board.tile_size)
-    team0_units.append(new_marksman)
-    team0.extend(new_marksman.get_units())
-
-def mk_arclight(grid_pos, team, color, board):
-    print(f"Creating Arclight at {grid_pos} for team {team}")
-    new_arclight = Arclight(grid_pos=grid_pos, team=team, color=color, tile_size=board.tile_size)
-    team0_units.append(new_arclight)
-    team0.extend(new_arclight.get_units())
-
-def mk_crawler_group(grid_pos, team, color, board):
-    print(f"Creating CrawlerGroup at {grid_pos} for team {team}")
-    # CrawlerGroup expects a start_grid_pos positional arg
-    new_crawler_group = CrawlerGroup(grid_pos, team=team, tile_size=board.tile_size, color=color)
-    team0_units.append(new_crawler_group)
-    team0.extend(new_crawler_group.get_units())
-
+def unit_placement(unit_type, grid_pos, team, color, board):
+    new_unit = unit_type(grid_pos=grid_pos, team=team, color=color, tile_size=board.tile_size)
+    team0_units.append(new_unit)
+    team0.extend(new_unit.get_units())
 
 
 def play_mode(board, current_time):
@@ -172,9 +155,9 @@ def main():
     start_button = Button(start_button_rect, "Start Round", font)
     placement_buttons = []
     placement_types = {
-            "Marksman": mk_marksman,
-            "Arclight": mk_arclight,
-            "Crawler": mk_crawler_group
+            "Marksman": Marksman,
+            "Arclight": Arclight,
+            "Crawler": CrawlerGroup,
         }
     for i, (label, create_func) in enumerate(placement_types.items()):
         rect = (WINDOW_WIDTH - button_width - button_margin, WINDOW_HEIGHT - (button_height + button_margin) * (len(placement_types) - i), button_width, button_height)
@@ -197,33 +180,47 @@ def main():
         if game_state == "placement":
             if event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 1:
-                    # 1. Check for 'Start' button click
+                    
+                    # Check if start button clicked
                     if start_button.is_clicked(event.pos) and not round_active:
                         round_active = True
                         start_button.active = False
                         game_state = "play"
-                        # Stop processing other actions for this click
-                        # It's better to use 'return' or 'continue' at the end of the event loop 
-                        # to exit, but within this if-block, the other checks are fine to run 
-                        # because they rely on other conditions (like placement_mode).
                     
-                    # 2. Check for placement button clicks (Sets placement_mode)
-                    # Use 'elif' to ensure this doesn't run if the start button was clicked
-                    # OR run this in a separate check block that always executes.
-                    
-                    # For simpler logic, let's keep it sequential:
-                    # Check for placement button clicks *first* because they are on the UI layer.
-                    
+                    # Check if any placement button clicked
+                    # button_clicked = False
+                    # for i, btn in enumerate(placement_buttons):
+                    #     if btn.is_clicked(event.pos):
+                    #         placement_mode = list(placement_types.keys())[i]
+                    #         button_clicked = True
+                    #         break
+
                     button_clicked = False
                     for i, btn in enumerate(placement_buttons):
                         if btn.is_clicked(event.pos):
-                            placement_mode = list(placement_types.keys())[i]
+                            # Get the unit *class* associated with the button
+                            unit_class = list(placement_types.values())[i]
+
+                            print(unit_class)
+                            
+                            # Store the placement_mode as the class itself for easy access, 
+                            # or just the label as before
+                            placement_mode = list(placement_types.keys())[i] 
+                            
+                            # *** NOW YOU CAN GET THE SIZE ***
+                            try:
+                                # Access the static GRID_SIZE attribute on the class
+                                unit_grid_size = unit_class.GRID_SIZE 
+                                print(f"Selected unit size: {unit_grid_size}")
+                                # You can store this in a global variable if needed for drawing/checks 
+                                # (e.g., current_unit_size = unit_grid_size)
+                            except AttributeError:
+                                print(f"Warning: {placement_mode} class does not have a GRID_SIZE attribute.")
+
                             button_clicked = True
                             break
                     
-                    # 3. Only attempt placement *if* a mode is already set and 
-                    # *if* no placement button was just clicked.
-                    # This is the key change to enforce the two-click process.
+                    # Handle unit placement on mouse click
                     if placement_mode and not button_clicked:
                         # Compute grid position from mouse click
                         tile_size, x_offset, y_offset = get_board_metrics(board, mouse_pos=event.pos)
@@ -232,25 +229,30 @@ def main():
                         grid_y = (my - y_offset) // tile_size
                         grid_pos = (grid_x, grid_y)
 
-                        # Check if the click is on the board area (optional but recommended)
-                        # You'll need to define a function/way to check if the grid_pos is valid/on-board.
-                        # Example simplified check:
-                        # if 0 <= grid_x < board_width and 0 <= grid_y < board_height: 
-
                         # Find the correct function from placement_types and place the unit
                         for label, create_func in placement_types.items():
                             if label == placement_mode:
-                                # Make sure to validate placement logic inside create_func
-                                # (e.g., check for existing units, valid location)
-                                create_func(grid_pos=grid_pos, team=1, color=TEAM_COLOR_BOTTOM, board=board)
+                                unit_placement(create_func, grid_pos=grid_pos, team=1, color=TEAM_COLOR_BOTTOM, board=board)
                                 placement_mode = None # Clear mode after placement
                                 break
 
 
-            
-            # ...handle placement logic here...
+            # Display the unit to be placed following the mouse
+            # if placement_mode:
+            #     print(f"Placing unit of type: {placement_mode}")
+
+            # Display the unit to be placed following the mouse
             if placement_mode:
-                print(f"Placing unit of type: {placement_mode}")
+                # You would use the stored unit_grid_size here to draw an outline 
+                # following the mouse, even before the unit is created.
+                
+                # 1. Get the unit class again from the placement_types dict
+                unit_class_to_place = placement_types.get(placement_mode)
+                
+                # 2. Get the size
+                if unit_class_to_place and hasattr(unit_class_to_place, 'GRID_SIZE'):
+                    size_w, size_h = unit_class_to_place.GRID_SIZE
+                    print(f"Placing unit of type: {placement_mode} with size: {size_w}x{size_h}")
 
                 
 
